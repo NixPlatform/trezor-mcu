@@ -200,7 +200,11 @@ int compile_output(const CoinInfo *coin, const HDNode *root, TxOutputType *in, T
 			return 0; // failed to compile output
 		}
 		if (needs_confirm) {
-			layoutConfirmOpReturn(in->op_return_data.bytes, in->op_return_data.size);
+			if (in->op_return_data.size >= 8 && memcmp(in->op_return_data.bytes, "omni", 4) == 0) {  // OMNI transaction
+				layoutConfirmOmni(in->op_return_data.bytes, in->op_return_data.size);
+			} else {
+				layoutConfirmOpReturn(in->op_return_data.bytes, in->op_return_data.size);
+			}
 			if (!protectButton(ButtonRequestType_ButtonRequest_ConfirmOutput, false)) {
 				return -1; // user aborted
 			}
@@ -612,9 +616,19 @@ uint32_t tx_serialize_footer(TxStruct *tx, uint8_t *out)
 {
 	memcpy(out, &(tx->lock_time), 4);
 	if (tx->overwintered) {
-		memcpy(out + 4, &(tx->expiry), 4);
-		out[8] = 0x00; // nJoinSplit
-		return 9;
+		if (tx->version == 3) {
+			memcpy(out + 4, &(tx->expiry), 4);
+			out[8] = 0x00; // nJoinSplit
+			return 9;
+		} else
+		if (tx->version == 4) {
+			memcpy(out + 4, &(tx->expiry), 4);
+			memset(out + 8, 0, 8); // valueBalance
+			out[16] = 0x00; // nShieldedSpend
+			out[17] = 0x00; // nShieldedOutput
+			out[18] = 0x00; // nJoinSplit
+			return 19;
+		}
 	}
 	if (tx->is_decred) {
 		memcpy(out + 4, &(tx->expiry), 4);

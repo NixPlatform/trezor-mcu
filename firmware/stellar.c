@@ -52,7 +52,7 @@ static StellarTransaction stellar_activeTx;
 /*
  * Starts the signing process and parses the transaction header
  */
-void stellar_signingInit(const StellarSignTx *msg)
+bool stellar_signingInit(const StellarSignTx *msg)
 {
     memset(&stellar_activeTx, 0, sizeof(StellarTransaction));
     stellar_signing = true;
@@ -78,10 +78,9 @@ void stellar_signingInit(const StellarSignTx *msg)
     stellar_hashupdate_bytes(tx_type_bytes, sizeof(tx_type_bytes));
 
     // Public key comes from deriving the specified account path
-    HDNode *node = stellar_deriveNode(msg->address_n, msg->address_n_count);
+    const HDNode *node = stellar_deriveNode(msg->address_n, msg->address_n_count);
     if (!node) {
-        // TODO: bail on error
-        return;
+        return false;
     }
     memcpy(&(stellar_activeTx.signing_pubkey), node->public_key + 1, sizeof(stellar_activeTx.signing_pubkey));
 
@@ -153,6 +152,8 @@ void stellar_signingInit(const StellarSignTx *msg)
     else {
         stellar_activeTx.network_type = 3;
     }
+
+    return true;
 }
 
 bool stellar_confirmSourceAccount(bool has_source_account, const char *str_account)
@@ -447,7 +448,7 @@ bool stellar_confirmManageOfferOp(const StellarManageOfferOp *msg)
 
     char str_buying[32];
     char str_buying_asset[32];
-    char str_price[17];
+    char str_price[32];
 
     stellar_format_asset(&(msg->buying_asset), str_buying_asset, sizeof(str_buying_asset));
     stellar_format_price(msg->price_n, msg->price_d, str_price, sizeof(str_price));
@@ -527,7 +528,7 @@ bool stellar_confirmCreatePassiveOfferOp(const StellarCreatePassiveOfferOp *msg)
 
     char str_buying[32];
     char str_buying_asset[32];
-    char str_price[17];
+    char str_price[32];
 
     stellar_format_asset(&(msg->buying_asset), str_buying_asset, sizeof(str_buying_asset));
     stellar_format_price(msg->price_n, msg->price_d, str_price, sizeof(str_price));
@@ -1229,7 +1230,12 @@ bool stellar_allOperationsConfirmed()
  */
 void stellar_getSignatureForActiveTx(uint8_t *out_signature)
 {
-    HDNode *node = stellar_deriveNode(stellar_activeTx.address_n, stellar_activeTx.address_n_count);
+    const HDNode *node = stellar_deriveNode(stellar_activeTx.address_n, stellar_activeTx.address_n_count);
+    if (!node) {
+        // return empty signature when we can't derive node
+        memset(out_signature, 0, 64);
+        return;
+    }
 
     // Signature is the ed25519 detached signature of the sha256 of all the bytes
     // that have been read so far
@@ -1267,27 +1273,32 @@ void stellar_format_price(uint32_t numerator, uint32_t denominator, char *out, s
 {
     memset(out, 0, outlen);
 
-    // early exist for invalid denominator
+    // early exit for invalid denominator
     if (denominator == 0) {
         strlcpy(out, _("[Invalid Price]"), outlen);
         return;
     }
 
-    int scale = 0;
-    double dbl_value = (double)numerator / (double)denominator;
+    // early exit for zero
+    if (numerator == 0) {
+        strlcpy(out, "0", outlen);
+        return;
+    }
 
-    // Multiply by 10 until the value is larger than the largest possible offer size
-    // Largest possible offer size is UINT32_MAX (4294967296)
-    while (dbl_value < UINT32_MAX) {
-        dbl_value *= (double)10;
+    int scale = 0;
+    uint64_t value = numerator;
+    while (value < (UINT64_MAX / 10)) {
+        value *= 10;
+        scale++;
+    }
+    value /= denominator;
+    while (value < (UINT64_MAX / 10)) {
+        value *= 10;
         scale++;
     }
 
-    // Cast back to an integer
-    uint64_t scaled_value = (uint64_t) dbl_value;
-
     // Format with bn_format_uint64
-    bn_format_uint64(scaled_value, NULL, NULL, scale, 0, false, out, outlen);
+    bn_format_uint64(value, NULL, NULL, scale, 0, false, out, outlen);
 }
 
 /*
@@ -1497,7 +1508,7 @@ uint16_t stellar_crc16(uint8_t *bytes, uint32_t length)
  *
  * All paths must be hardened
  */
-HDNode *stellar_deriveNode(const uint32_t *address_n, size_t address_n_count)
+const HDNode *stellar_deriveNode(const uint32_t *address_n, size_t address_n_count)
 {
     static CONFIDENTIAL HDNode node;
     const char *curve = "ed25519";
@@ -1564,7 +1575,7 @@ void stellar_hashupdate_bool(bool value)
     }
 }
 
-void stellar_hashupdate_string(uint8_t *data, size_t len)
+void stellar_hashupdate_string(const uint8_t *data, size_t len)
 {
     // Hash the length of the string
     stellar_hashupdate_uint32((uint32_t)len);
@@ -1583,7 +1594,7 @@ void stellar_hashupdate_string(uint8_t *data, size_t len)
     }
 }
 
-void stellar_hashupdate_address(uint8_t *address_bytes)
+void stellar_hashupdate_address(const uint8_t *address_bytes)
 {
     // First 4 bytes of an address are the type. There's only one type (0)
     stellar_hashupdate_uint32(0);
@@ -1799,9 +1810,9 @@ void stellar_layoutSigningDialog(const char *line1, const char *line2, const cha
     int offset_y = 1;
     int line_height = 9;
 
-    HDNode *node = stellar_deriveNode(address_n, address_n_count);
+    const HDNode *node = stellar_deriveNode(address_n, address_n_count);
     if (!node) {
-        // TODO: bail on error
+        // abort on error
         return;
     }
 

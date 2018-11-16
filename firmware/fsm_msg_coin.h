@@ -63,7 +63,7 @@ void fsm_msgGetPublicKey(const GetPublicKey *msg)
 	}
 	resp->has_xpub = true;
 
-	if (coin->xpub_magic && script_type == InputScriptType_SPENDADDRESS) {
+	if (coin->xpub_magic && (script_type == InputScriptType_SPENDADDRESS || script_type == InputScriptType_SPENDMULTISIG)) {
 		hdnode_serialize_public(node, fingerprint, coin->xpub_magic, resp->xpub, sizeof(resp->xpub));
 	} else
 	if (coin->has_segwit && coin->xpub_magic_segwit_p2sh && script_type == InputScriptType_SPENDP2SHWITNESS) {
@@ -232,7 +232,7 @@ void fsm_msgGetAddress(const GetAddress *msg)
 
 		bool is_cashaddr = coin->cashaddr_prefix != NULL;
 		bool is_bech32 = msg->script_type == InputScriptType_SPENDWITNESS;
-		if (!fsm_layoutAddress(address, desc, is_cashaddr || is_bech32, is_cashaddr ? strlen(coin->cashaddr_prefix) + 1 : 0, msg->address_n, msg->address_n_count)) {
+		if (!fsm_layoutAddress(address, desc, is_cashaddr || is_bech32, is_cashaddr ? strlen(coin->cashaddr_prefix) + 1 : 0, msg->address_n, msg->address_n_count, false)) {
 			return;
 		}
 	}
